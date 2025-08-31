@@ -23,6 +23,16 @@ const dummyData: TodayAppointmentRecord[] = [
     timeAndDate: "2025-07-08 2:15 PM",
     category: "Orthodontics",
   },
+    {
+    applicationNumber: "APP003",
+    membershipNumber: "MEM003",
+    type: "Follow-up",
+    name: "Dr. Satish Kumar",
+    email: "kumar@example.com",
+    mobile: "8886016033",
+    timeAndDate: "2025-07-10 2:15 PM",
+    category: "Orthodontics",
+  },
 ];
 
 export default function Page() {
