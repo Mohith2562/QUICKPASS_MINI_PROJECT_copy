@@ -30,8 +30,8 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
-  title: "Telangana Dental Council",
-  description: "Official website of the Telangana Dental Council",
+  title: "HITAM Quickpass",
+  description: "official HITAM website for generating automated outpasses",
 };
 
 export default function RootLayout({
@@ -40,7 +40,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <div className="pt-20">
+    <div className="pt-0">
       <html
         lang="en"
         className={`${geistSans.variable} ${geistMono.variable} ${francois.variable} ${inter.variable} ${poppins.variable}`}
