@@ -12,43 +12,34 @@ import {
     Eye
 } from "lucide-react"
 
-type HodHistoryStats = {
-    totalProcessed: number
-    approvedCount: number
-    rejectedCount: number
-    approvalRate: number
-}
-
 type HodHistoryRecord = {
     id: string
     studentName: string
-    studentId: string
-    teacher: string
+    rollNumber: string
+    facultyApprover: string
     reasonCategory: string
     reason: string
-    status: "hod_approved" | "hod_rejected"
-    processedAt: string
-}
-
-type HodHistoryResponse = {
-    stats: HodHistoryStats
-    history: HodHistoryRecord[]
+    decision: "approved" | "rejected"
+    processedOn: string
+    rejectionReason?: string | null
 }
 
 const API_BASE =
     (process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") as string) || "http://localhost:5000"
 
 const statusBadgeStyles: Record<
-    HodHistoryRecord["status"],
-    { badge: string; icon: typeof CheckCircle }
+    HodHistoryRecord["decision"],
+    { badge: string; icon: typeof CheckCircle; label: string }
 > = {
-    hod_approved: {
+    approved: {
         badge: "text-green-600 bg-green-50 border-green-200",
-        icon: CheckCircle
+        icon: CheckCircle,
+        label: "Approved"
     },
-    hod_rejected: {
+    rejected: {
         badge: "text-red-600 bg-red-50 border-red-200",
-        icon: XCircle
+        icon: XCircle,
+        label: "Rejected"
     }
 }
 
@@ -57,7 +48,14 @@ export default function HodHistoryPage() {
     const searchParams = useSearchParams()
     const [searchTerm, setSearchTerm] = useState("")
     const [selectedStatus, setSelectedStatus] = useState(searchParams.get("status") ?? "all")
-    const [historyData, setHistoryData] = useState<HodHistoryResponse | null>(null)
+    const [selectedSort, setSelectedSort] = useState(searchParams.get("sort") ?? "newest")
+    const [historyRecords, setHistoryRecords] = useState<HodHistoryRecord[]>([])
+    const [summary, setSummary] = useState<{
+        totalProcessed: number
+        approved: number
+        rejected: number
+        approvalRate: string
+    } | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [isExporting, setIsExporting] = useState(false)
@@ -83,6 +81,9 @@ export default function HodHistoryPage() {
                 if (selectedStatus !== "all") {
                     params.set("status", selectedStatus)
                 }
+                if (selectedSort && selectedSort !== "newest") {
+                    params.set("sort", selectedSort)
+                }
 
                 const response = await fetch(
                     `${API_BASE}/api/hod/history${params.toString() ? `?${params}` : ""}`,
@@ -104,8 +105,29 @@ export default function HodHistoryPage() {
                     )
                 }
 
-                const payload: HodHistoryResponse = await response.json()
-                setHistoryData(payload)
+                const payload = await response.json()
+                setSummary({
+                    totalProcessed: Number(payload?.summary?.totalProcessed ?? 0),
+                    approved: Number(payload?.summary?.approved ?? 0),
+                    rejected: Number(payload?.summary?.rejected ?? 0),
+                    approvalRate: String(payload?.summary?.approvalRate ?? "0%")
+                })
+                const mapped: HodHistoryRecord[] = Array.isArray(payload?.outpasses)
+                    ? payload.outpasses.map((item: any) => ({
+                          id:
+                              item?.requestId ??
+                              `${item?.studentName ?? "record"}-${item?.processedOn ?? Date.now()}`,
+                          studentName: item?.studentName ?? "Unknown Student",
+                          rollNumber: item?.rollNumber ?? "N/A",
+                          facultyApprover: item?.facultyApprover ?? "N/A",
+                          reasonCategory: item?.reasonCategory ?? "General",
+                          reason: item?.reason ?? "Not provided",
+                          decision: (item?.decision ?? "approved") as HodHistoryRecord["decision"],
+                          processedOn: item?.processedOn ?? "N/A",
+                          rejectionReason: item?.rejectionReason ?? null
+                      }))
+                    : []
+                setHistoryRecords(mapped)
             } catch (err: unknown) {
                 if ((err as Error)?.name === "AbortError") return
                 setError((err as Error)?.message ?? "Unable to load decision history.")
@@ -117,32 +139,52 @@ export default function HodHistoryPage() {
         fetchHistory()
 
         return () => controller.abort()
-    }, [selectedStatus])
+    }, [selectedStatus, selectedSort])
 
     useEffect(() => {
-        const status = searchParams.get("status")
-        if (status && ["all", "hod_approved", "hod_rejected"].includes(status)) {
-            setSelectedStatus(status)
+        const statusParam = searchParams.get("status")
+        const normalizedStatus =
+            statusParam === "hod_approved"
+                ? "approved"
+                : statusParam === "hod_rejected"
+                ? "rejected"
+                : statusParam
+        if (normalizedStatus && ["all", "approved", "rejected"].includes(normalizedStatus)) {
+            setSelectedStatus(normalizedStatus)
+        }
+        const sort = searchParams.get("sort")
+        if (sort && ["newest", "oldest"].includes(sort)) {
+            setSelectedSort(sort)
         }
     }, [searchParams])
 
     const filteredHistory = useMemo(() => {
-        if (!historyData) return []
         const query = searchTerm.trim().toLowerCase()
-        return historyData.history.filter((record) => {
+        const filtered = historyRecords.filter((record) => {
             const matchesSearch =
                 query.length === 0 ||
                 record.studentName.toLowerCase().includes(query) ||
-                record.studentId.toLowerCase().includes(query) ||
-                record.reason.toLowerCase().includes(query)
+                record.rollNumber.toLowerCase().includes(query) ||
+                record.reason.toLowerCase().includes(query) ||
+                record.reasonCategory.toLowerCase().includes(query)
 
             if (!matchesSearch) return false
 
             if (selectedStatus === "all") return true
 
-            return record.status === selectedStatus
+            return record.decision === selectedStatus
         })
-    }, [historyData, searchTerm, selectedStatus])
+
+        if (selectedSort === "oldest") {
+            return [...filtered].sort((a, b) =>
+                new Date(a.processedOn).getTime() - new Date(b.processedOn).getTime()
+            )
+        }
+
+        return [...filtered].sort(
+            (a, b) => new Date(b.processedOn).getTime() - new Date(a.processedOn).getTime()
+        )
+    }, [historyRecords, searchTerm, selectedStatus, selectedSort])
 
     const handleStatusChange = (value: string) => {
         setSelectedStatus(value)
@@ -151,6 +193,17 @@ export default function HodHistoryPage() {
             params.delete("status")
         } else {
             params.set("status", value)
+        }
+        router.push(`?${params.toString()}`, { scroll: false })
+    }
+
+    const handleSortChange = (value: string) => {
+        setSelectedSort(value)
+        const params = new URLSearchParams(searchParams.toString())
+        if (value === "newest") {
+            params.delete("sort")
+        } else {
+            params.set("sort", value)
         }
         router.push(`?${params.toString()}`, { scroll: false })
     }
@@ -173,15 +226,13 @@ export default function HodHistoryPage() {
         )
     }
 
-    if (!historyData) {
+    if (!summary) {
         return (
             <div className="p-6 text-gray-600">
                 No history available.
             </div>
         )
     }
-
-    const { stats } = historyData
 
     return (
         <div className="p-6 space-y-6">
@@ -198,12 +249,12 @@ export default function HodHistoryPage() {
                     </div>
                     <div className="hidden md:flex items-center space-x-4">
                         <div className="text-center">
-                            <div className="text-2xl font-bold">{stats.totalProcessed}</div>
+                            <div className="text-2xl font-bold">{summary.totalProcessed}</div>
                             <div className="text-sm text-green-100">Total Processed</div>
                         </div>
                         <div className="w-px h-12 bg-green-400" />
                         <div className="text-center">
-                            <div className="text-2xl font-bold">{stats.approvalRate}%</div>
+                            <div className="text-2xl font-bold">{summary.approvalRate}</div>
                             <div className="text-sm text-green-100">Approval Rate</div>
                         </div>
                     </div>
@@ -215,7 +266,7 @@ export default function HodHistoryPage() {
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm text-gray-600">Total Processed</p>
-                            <p className="text-2xl font-bold text-blue-600">{stats.totalProcessed}</p>
+                            <p className="text-2xl font-bold text-blue-600">{summary.totalProcessed}</p>
                         </div>
                         <div className="bg-blue-100 p-3 rounded-lg">
                             <HistoryIcon className="w-6 h-6 text-blue-600" />
@@ -227,7 +278,7 @@ export default function HodHistoryPage() {
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm text-gray-600">Approved</p>
-                            <p className="text-2xl font-bold text-green-600">{stats.approvedCount}</p>
+                            <p className="text-2xl font-bold text-green-600">{summary.approved}</p>
                         </div>
                         <div className="bg-green-100 p-3 rounded-lg">
                             <CheckCircle className="w-6 h-6 text-green-600" />
@@ -239,7 +290,7 @@ export default function HodHistoryPage() {
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm text-gray-600">Rejected</p>
-                            <p className="text-2xl font-bold text-red-600">{stats.rejectedCount}</p>
+                            <p className="text-2xl font-bold text-red-600">{summary.rejected}</p>
                         </div>
                         <div className="bg-red-100 p-3 rounded-lg">
                             <XCircle className="w-6 h-6 text-red-600" />
@@ -251,7 +302,7 @@ export default function HodHistoryPage() {
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm text-gray-600">Approval Rate</p>
-                            <p className="text-2xl font-bold text-purple-600">{stats.approvalRate}%</p>
+                            <p className="text-2xl font-bold text-purple-600">{summary.approvalRate}</p>
                         </div>
                         <div className="bg-purple-100 p-3 rounded-lg">
                             <CheckCircle className="w-6 h-6 text-purple-600" />
@@ -323,7 +374,7 @@ export default function HodHistoryPage() {
                         </thead>
                         <tbody className="divide-y divide-gray-200 bg-white">
                             {filteredHistory.map((record) => {
-                                const statusConfig = statusBadgeStyles[record.status]
+                                const statusConfig = statusBadgeStyles[record.decision]
                                 const StatusIcon = statusConfig.icon
                                 return (
                                     <tr key={record.id} className="transition-colors hover:bg-gray-50">
@@ -331,14 +382,19 @@ export default function HodHistoryPage() {
                                             <div className="text-sm font-medium text-gray-900">
                                                 {record.studentName}
                                             </div>
-                                            <div className="text-sm text-gray-500">{record.studentId}</div>
+                                            <div className="text-sm text-gray-500">{record.rollNumber}</div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                            {record.teacher}
+                                            {record.facultyApprover}
                                         </td>
                                         <td className="px-6 py-4 text-sm text-gray-600">
                                             <div className="font-medium text-gray-900">{record.reasonCategory}</div>
                                             <div className="text-gray-500">{record.reason}</div>
+                                            {record.decision === "rejected" && record.rejectionReason && (
+                                                <div className="mt-1 text-xs text-red-500">
+                                                    Reason: {record.rejectionReason}
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <span
@@ -346,12 +402,12 @@ export default function HodHistoryPage() {
                                             >
                                                 <StatusIcon className="h-3 w-3" />
                                                 <span className="ml-1 capitalize">
-                                                    {record.status.replace("hod_", "")}
+                                                    {statusConfig.label}
                                                 </span>
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                            {record.processedAt}
+                                            {record.processedOn}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
                                             <button className="inline-flex items-center justify-center rounded-full p-2 text-[#1F8941] transition-colors hover:text-[#1a7a39]">
