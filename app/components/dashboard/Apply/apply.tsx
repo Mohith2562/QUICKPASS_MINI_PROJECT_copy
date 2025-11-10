@@ -52,7 +52,7 @@ export default function Apply() {
     const toDate = new Date(formData.dateTo)
     const now = new Date()
 
-    if (fromDate < now.setHours(0,0,0,0)) {
+    if (fromDate < now.setHours(0, 0, 0, 0)) {
       newErrors.dateFrom = 'Start date cannot be in the past'
     }
 

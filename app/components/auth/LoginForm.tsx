@@ -1,18 +1,38 @@
 "use client";
 
-import { useState } from "react";
+import { Dispatch, SetStateAction, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { User, Lock } from "lucide-react";
 
-export default function Box() {
+type LoginCardId = "student" | "employee" | "admin";
+
+type LoginFormState = {
+  email: string;
+  password: string;
+};
+
+type LoginCardConfig = {
+  id: LoginCardId;
+  title: string;
+  form: LoginFormState;
+  setForm: Dispatch<SetStateAction<LoginFormState>>;
+  redirectPath?: string;
+};
+
+const INITIAL_FORM: LoginFormState = {
+  email: "",
+  password: "",
+};
+
+export default function LoginForm() {
   const router = useRouter();
 
-  const [studentForm, setStudentForm] = useState({ email: "", password: "" });
-  const [employeeForm, setEmployeeForm] = useState({ email: "", password: "" });
-  const [adminForm, setAdminForm] = useState({ email: "", password: "" });
+  const [studentForm, setStudentForm] = useState<LoginFormState>(INITIAL_FORM);
+  const [employeeForm, setEmployeeForm] = useState<LoginFormState>(INITIAL_FORM);
+  const [adminForm, setAdminForm] = useState<LoginFormState>(INITIAL_FORM);
 
-  const loginCards = [
+  const loginCards: LoginCardConfig[] = [
     {
       id: "student",
       title: "Student Login",
@@ -25,7 +45,7 @@ export default function Box() {
       title: "Employee Login",
       form: employeeForm,
       setForm: setEmployeeForm,
-    }, // no fixed path here
+    },
     {
       id: "admin",
       title: "Admin Login",
@@ -35,14 +55,16 @@ export default function Box() {
     },
   ];
 
-  const handleInputChange = (cardId: string, field: string, value: string) => {
+  const handleInputChange = (
+    cardId: LoginCardId,
+    field: keyof LoginFormState,
+    value: string
+  ) => {
     const card = loginCards.find((c) => c.id === cardId);
-    if (card) {
-      card.setForm((prev: any) => ({ ...prev, [field]: value }));
-    }
+    card?.setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleLogin = async (cardId: string) => {
+  const handleLogin = async (cardId: LoginCardId) => {
     const card = loginCards.find((c) => c.id === cardId);
     if (!card) return;
 
@@ -50,46 +72,47 @@ export default function Box() {
     console.log(`Attempting login for ${card.title} with email: ${email}`);
 
     try {
-      const res = await fetch("http://localhost:5000/api/auth/login", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+      const res = await fetch(`${apiUrl}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include", // <-- crucial for cookie auth
+        credentials: "include",
         body: JSON.stringify({ email, password }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        console.log("Login successful!", data);
-
-        // Role check
-        if (data.role !== cardId && cardId !== "employee") {
-          console.error(`Login failed: Invalid role for ${card.title} card.`);
-          alert("Login failed: Invalid role for this login card.");
-          return;
-        }
-
-        // Save token + user info (optional if you want token for API calls via Authorization header)
-        localStorage.setItem("user", JSON.stringify(data));
-        localStorage.setItem("token", data.token);
-
-        // Role-based redirect
-        if (cardId === "employee") {
-          if (data.role === "mentor" || data.role === "faculty") {
-            router.push("/teacher");
-          } else if (data.role === "hod") {
-            router.push("/hod");
-          } else if (data.role === "protocol_officer") {
-            router.push("/protocol");
-          } else {
-            alert("Unknown employee role. Please contact admin.");
-          }
-        } else {
-          router.push(card.redirectPath!);
-        }
-      } else {
-        const error = await res.json();
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ message: "Unknown error" }));
         console.error("Login failed:", error.message);
         alert(`Login failed: ${error.message}`);
+        return;
+      }
+
+      const data = await res.json();
+      console.log("Login successful!", data);
+
+      if (cardId !== "employee" && data.role !== cardId) {
+        console.error(
+          `Login failed: Invalid role (${data.role}) for ${card.title} card.`
+        );
+        alert("Login failed: Invalid role for this login card.");
+        return;
+      }
+
+      localStorage.setItem("user", JSON.stringify(data));
+      localStorage.setItem("token", data.token);
+
+      if (cardId === "employee") {
+        if (data.role === "mentor" || data.role === "faculty") {
+          router.push("/teacher");
+        } else if (data.role === "hod") {
+          router.push("/hod");
+        } else if (data.role === "protocol_officer") {
+          router.push("/protocol");
+        } else {
+          alert("Unknown employee role. Please contact admin.");
+        }
+      } else if (card.redirectPath) {
+        router.push(card.redirectPath);
       }
     } catch (err) {
       console.error("Network or server error:", err);
@@ -97,13 +120,12 @@ export default function Box() {
     }
   };
 
-  const handleForgotPassword = (cardId: string) => {
+  const handleForgotPassword = (cardId: LoginCardId) => {
     alert(`Forgot password for ${cardId} is not implemented yet.`);
   };
 
   return (
     <main className="flex flex-col min-h-screen items-center bg-white overscroll-none">
-      {/* Header */}
       <header className="w-full px-3 my-3 space-y-3">
         <div>
           <Image
@@ -126,14 +148,12 @@ export default function Box() {
         </div>
       </header>
 
-      {/* Banner */}
       <div className="w-full px-3">
         <h1 className="w-full bg-[#1f8941] flex justify-center items-center font-['Albert_Sans-Bold'] font-bold text-white text-2xl sm:text-3xl py-3">
           QUICKPASS
         </h1>
       </div>
 
-      {/* Login Cards */}
       <div className="w-full flex flex-wrap justify-evenly items-center grow py-6 md:px-8 lg:px-12">
         {loginCards.map((card) => (
           <section
@@ -155,7 +175,6 @@ export default function Box() {
               }}
               className="space-y-4"
             >
-              {/* Email */}
               <div className="relative">
                 <User
                   size={20}
@@ -171,7 +190,6 @@ export default function Box() {
                 />
               </div>
 
-              {/* Password */}
               <div className="relative">
                 <Lock
                   size={20}
@@ -187,10 +205,9 @@ export default function Box() {
                 />
               </div>
 
-              {/* Login Button */}
               <button
                 type="submit"
-                className="w-full bg-[#1f8941] text-white py-2 rounded-lg text-lg hover:bg-[#1a7a39] transition duration-200"
+                className="w-full bg-[#1f8941] text-white py-2 rounded-lg text-lg hover:bg-[#1a7a39] transition duration-200 no-underline"
               >
                 Login
               </button>
@@ -199,7 +216,7 @@ export default function Box() {
             <button
               type="button"
               onClick={() => handleForgotPassword(card.id)}
-              className="block mt-3 mx-auto text-sm hover:text-[#1f8941]"
+              className="block mt-3 mx-auto text-sm hover:text-[#1f8941] no-underline"
             >
               Forgot Password
             </button>
@@ -207,7 +224,6 @@ export default function Box() {
         ))}
       </div>
 
-      {/* Footer */}
       <footer className="w-full mt-auto px-3 mb-3">
         <Image
           src="/bott.png"
